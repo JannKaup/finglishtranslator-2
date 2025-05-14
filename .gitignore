@@ -3,3 +3,7 @@
 data.tar
 *.pt
 /checkpoints
+data/test-clean.tar.gz
+data/LibriSpeech/
+model_dyn.pth.gz
+ablation.csv

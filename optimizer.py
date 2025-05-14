@@ -24,14 +24,14 @@ from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 from jiwer import wer
 
 # === CONFIGURATION ===
-MODEL_CHECKPOINT = "./model.pt"          # your checkpoint path
+MODEL_CHECKPOINT = "./model.pt"
 BASE_MODEL = "facebook/wav2vec2-base-960h"
 DATA_DIR = "./data"
 EVAL_SAMPLES = 100
 DEVICE = torch.device("cpu")
 ABLATION_CSV = "ablation.csv"
 MAX_AUDIO_LENGTH = 16000 * 5  # 5s
-PRUNE_AMOUNT = 0.8  # fraction of weights to prune globally
+PRUNE_AMOUNT = 0.8
 
 # === UTILITIES ===
 def measure_size(path): return round(os.path.getsize(path) / (1024**2), 2)
@@ -57,7 +57,7 @@ def compute_wer(model, processor, dataset, num_samples=100):
         with torch.no_grad():
             logits = model(inputs).logits
         pred = processor.batch_decode(torch.argmax(logits, -1))[0]
-        total += wer(transcript.lower(), pred.lower())  # lowercase for robustness
+        total += wer(transcript.lower(), pred.lower())
         cnt += 1
     return round(total / cnt, 4)
 
@@ -83,7 +83,6 @@ if os.path.exists(MODEL_CHECKPOINT):
 model.eval()
 
 # dummy input
-#inp0 = torch.zeros(1, MAX_AUDIO_LENGTH)
 sample = test_clean[0][0]
 input_values = proc(sample.numpy().squeeze(), sampling_rate=16000, return_tensors="pt").input_values.to(DEVICE)
 
