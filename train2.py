@@ -34,19 +34,16 @@ def setup_logging():
     logging.basicConfig(level=logging.INFO)
     return logging.getLogger(__name__)
 
-
 def set_global_seed(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     set_seed(seed)
 
-
 def resolve_paths(df: pd.DataFrame, csv_path: Path) -> pd.DataFrame:
     base = csv_path.parent
     df["path"] = df["path"].map(lambda p: str((base / p).resolve()) if not Path(p).is_absolute() else str(Path(p)))
     return df
-
 
 # For data augmentation
 def add_noise(audio, noise_level=0.005):
@@ -61,13 +58,11 @@ def random_volume(audio, gain_db_range=(-5, 5)):
     gain_db = random.uniform(*gain_db_range)
     return audio * (10.0 ** (gain_db / 20.0))
 
-
 def preprocess_dataset(dataset: Dataset, processor: Wav2Vec2Processor) -> Dataset:
     def preprocess(example):
         audio = example["path"]["array"]
         audio = torch.tensor(audio)
-
-        # Augmentation
+       
         if random.random() < 0.5:
             audio = add_noise(audio)
             audio = random_volume(audio)
@@ -89,7 +84,6 @@ def preprocess_dataset(dataset: Dataset, processor: Wav2Vec2Processor) -> Datase
 
     return dataset.map(preprocess, remove_columns=["path", "text"])
 
-
 def collate_fn(batch):
     input_tensors = [torch.tensor(b["input_values"], dtype=torch.float32) for b in batch]
     input_values = pad_sequence(input_tensors, batch_first=True, padding_value=0.0)
@@ -104,7 +98,6 @@ def collate_fn(batch):
         "labels": labels
     }
 
-
 def save_checkpoint(model, optimizer, epoch, loss, filepath):
     checkpoint = {
         'epoch': epoch,
@@ -116,7 +109,6 @@ def save_checkpoint(model, optimizer, epoch, loss, filepath):
     torch.save(checkpoint, filepath)
     logging.info(f"Checkpoint saved at {filepath}")
 
-
 def load_checkpoint(model, optimizer, checkpoint_path):
     checkpoint = torch.load(checkpoint_path)
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -124,7 +116,6 @@ def load_checkpoint(model, optimizer, checkpoint_path):
     epoch = checkpoint['epoch']
     loss = checkpoint['loss']
     return model, optimizer, epoch, loss
-
 
 def train(model, processor, train_loader, eval_dataset, device, args, logger, checkpoint_path, patience=2, min_delta=0.001):
     model.train()
@@ -136,8 +127,11 @@ def train(model, processor, train_loader, eval_dataset, device, args, logger, ch
         logger.info(f"Resuming from epoch {start_epoch + 1} with loss {loss:.4f}")
     else:
         start_epoch = 0
-
+        logger.info("Starting from scratch.")
+    
+    best_model_path = f"{args.output_dir}/best_model.pth"
     best_wer = float("inf")
+    best_model_state_dict = None
     patience_counter = 0
 
     for epoch in range(start_epoch, args.epochs):
@@ -174,7 +168,7 @@ def train(model, processor, train_loader, eval_dataset, device, args, logger, ch
             best_wer = current_wer
             patience_counter = 0
             # Save best model
-            best_model_path = f"{args.output_dir}/best_model.pth"
+            best_model_state_dict = model.state_dict()
             save_checkpoint(model, optimizer, epoch + 1, avg_loss, best_model_path)
             logger.info("Best model saved.")
         else:
@@ -194,8 +188,10 @@ def train(model, processor, train_loader, eval_dataset, device, args, logger, ch
         checkpoint_path = f"{args.output_dir}/checkpoint_epoch_{epoch + 1}.pth"
         save_checkpoint(model, optimizer, epoch + 1, avg_loss, checkpoint_path)
 
+    if best_model_state_dict is not None:
+        model.load_state_dict(best_model_state_dict)
+        logger.info("Loaded best model weights before returning.")
     return model
-
 
 def evaluate(model, processor, dataset, device, logger, num_samples=None):
     model.eval()
@@ -245,7 +241,6 @@ def evaluate(model, processor, dataset, device, logger, num_samples=None):
 
     return avg_wer, avg_cer
 
-
 def compute_wer(ref: str, hyp: str) -> float:
     r, h = ref.split(), hyp.split()
     d = np.zeros((len(r)+1)*(len(h)+1), dtype=np.uint8).reshape((len(r)+1, len(h)+1))
@@ -266,7 +261,6 @@ def compute_wer(ref: str, hyp: str) -> float:
                 d[i][j] = min(substitution, insertion, deletion)
     return d[len(r)][len(h)] / float(len(r)) if r else 1.0
 
-
 def compute_cer(ref: str, hyp: str) -> float:
     r, h = list(ref), list(hyp)
     d = np.zeros((len(r)+1)*(len(h)+1), dtype=np.uint8).reshape((len(r)+1, len(h)+1))
@@ -286,7 +280,6 @@ def compute_cer(ref: str, hyp: str) -> float:
                 deletion     = d[i-1][j] + 1
                 d[i][j] = min(substitution, insertion, deletion)
     return d[len(r)][len(h)] / float(len(r)) if r else 1.0
-
 
 def main(args):
     logger = setup_logging()
@@ -330,22 +323,18 @@ def main(args):
     trained_model.save_pretrained(args.output_dir)
     processor.save_pretrained(args.output_dir)
 
-    torch.save(model.state_dict(), "model.pt")
+    torch.save(trained_model.state_dict(), "model.pt")
 
     logger.info("Done.")
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Manual fine-tuning of Wav2Vec2.")
-    #default_csv = Path(__file__).resolve().parent / "transcript.csv"
-    #parser.add_argument("--csv", type=str, default=str(default_csv))
     parser.add_argument('--data_path', type=str,default="")
     parser.add_argument("--csv", type=str, default="transcript.csv")
     parser.add_argument("--model-name", type=str, default="facebook/wav2vec2-base-960h")
-    #parser.add_argument("--model-name", type=str, default="facebook/wav2vec2-large-960h-lv60-self")
     parser.add_argument("--output-dir", type=str, default="./checkpoints")
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--learning-rate", type=float, default=1e-8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--checkpoint-path", type=str, default=None, help="Path to checkpoint to resume training from.")

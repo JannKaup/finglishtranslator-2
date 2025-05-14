@@ -44,14 +44,22 @@ def measure_latency(model, input_values, runs=50):
     return (time.time()-start)/runs*1000
 
 def compute_wer(model, processor, dataset, num_samples=100):
-    model.to(DEVICE).eval(); total, cnt = 0.0, 0
-    for wav, sr, transcript, *_ in dataset:
-        if cnt>=num_samples: break
-        inp = processor(wav.squeeze().numpy(), sampling_rate=sr, return_tensors="pt", padding=True).input_values.to(DEVICE)
-        with torch.no_grad(): logits = model(inp).logits
+    model.to(DEVICE).eval()
+    total, cnt = 0.0, 0
+    for i in range(min(num_samples, len(dataset))):
+        wav, sr, transcript, *_ = dataset[i]
+        inputs = processor(
+            wav.squeeze().numpy(),
+            sampling_rate=sr,
+            return_tensors="pt",
+            padding=True
+        ).input_values.to(DEVICE)
+        with torch.no_grad():
+            logits = model(inputs).logits
         pred = processor.batch_decode(torch.argmax(logits, -1))[0]
-        total += wer(transcript, pred); cnt+=1
-    return round(total/cnt,4)
+        total += wer(transcript.lower(), pred.lower())  # lowercase for robustness
+        cnt += 1
+    return round(total / cnt, 4)
 
 def log_ablation(row):
     hdr=["variant","size_mb","latency_ms","wer"]
@@ -75,12 +83,16 @@ if os.path.exists(MODEL_CHECKPOINT):
 model.eval()
 
 # dummy input
-inp0 = torch.zeros(1, MAX_AUDIO_LENGTH)
-input_values = proc(inp0.numpy().squeeze(), sampling_rate=16000, return_tensors="pt").input_values.to(DEVICE)
+#inp0 = torch.zeros(1, MAX_AUDIO_LENGTH)
+sample = test_clean[0][0]
+input_values = proc(sample.numpy().squeeze(), sampling_rate=16000, return_tensors="pt").input_values.to(DEVICE)
 
 # === 1. Baseline FP32 ===
 print("\n=== Baseline FP32 ===")
 size_fp32 = measure_size(MODEL_CHECKPOINT) if os.path.exists(MODEL_CHECKPOINT) else None
+if size_fp32 is None:
+    torch.save(model.state_dict(), "model_fp32.pth")
+    size_fp32 = measure_size("model_fp32.pth")    
 lat_fp32 = measure_latency(model, input_values)
 wer_fp32 = compute_wer(model, proc, test_clean, num_samples=EVAL_SAMPLES)
 print(f"Size: {size_fp32} MB | Latency: {lat_fp32:.1f} ms | WER: {wer_fp32}")
@@ -100,7 +112,7 @@ for m, _ in to_prune:
     prune.remove(m, 'weight')
 
 print("\n=== Dynamic INT8 quantization ===")
-model_dyn = torch.quantization.quantize_dynamic(model, {nn.Linear}, dtype=torch.qint8).eval()
+model_dyn = torch.quantization.quantize_dynamic(model, {nn.Linear, nn.LSTM, nn.GRU}, dtype=torch.qint8).eval()
 # save and size
 torch.save(
     model_dyn.state_dict(),
@@ -130,5 +142,6 @@ wrapper = Wrapper(model_dyn).eval()
 traced = torch.jit.trace(wrapper, input_values)
 traced.save("model_ts.pt")
 print("Exported TorchScript as model_ts.pt")
-
+torch.jit.load("model_ts.pt").graph
+print(traced.graph)
 print("Done. Ablation logged to", ABLATION_CSV)
