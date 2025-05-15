@@ -1,0 +1,7 @@
+variant,size_mb,latency_ms,wer
+fp32,360.16,1155.8,0.0483
+prune80_dynamic_int8,116.04,920.3,1.0
+prune80_dynamic_int8_gzip,46.78,N/A,N/A
+fp32,360.16,1089.4,0.0483
+prune80_dynamic_int8,116.04,944.5,1.0
+prune80_dynamic_int8_gzip,46.78,N/A,N/A
